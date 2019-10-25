@@ -5,11 +5,12 @@ use ash::extensions::{ext, khr};
 use ash::version::{EntryV1_0, InstanceV1_0, InstanceV1_1};
 use ash::vk;
 
-use crate::debug::{DebugSeverity, DebugType};
+use crate::debug::{DebugOptions, DebugSeverity, DebugType};
 use crate::errors::VulkanError;
 use crate::extensions::DeviceExtensions;
 use semver::Version;
 
+#[derive(Clone)]
 pub struct ApplicationInfo {
     pub application_name: String,
     pub application_version: Version,
@@ -208,39 +209,25 @@ impl VulkanInstance {
 }
 
 pub struct VulkanInstanceBuilder<'a> {
-    debug: bool,
-    debug_severity: DebugSeverity,
-    debug_type: DebugType,
+    debug_options: DebugOptions,
     application_info: Option<&'a ApplicationInfo>,
 }
 
 impl<'a> VulkanInstanceBuilder<'a> {
     pub fn new() -> Self {
         VulkanInstanceBuilder {
-            debug: false,
-            debug_severity: DebugSeverity::default(),
-            debug_type: DebugType::default(),
+            debug_options: DebugOptions::default(),
             application_info: None,
         }
     }
 
-    pub fn with_debug_enabled(mut self, debug: bool) -> Self {
-        self.debug = debug;
+    pub fn with_debug_options(mut self, debug_options: DebugOptions) -> Self {
+        self.debug_options = debug_options;
         self
     }
 
-    pub fn with_debug_severity(mut self, debug_severity: DebugSeverity) -> Self {
-        self.debug_severity = debug_severity;
-        self
-    }
-
-    pub fn with_debug_type(mut self, debug_type: DebugType) -> Self {
-        self.debug_type = debug_type;
-        self
-    }
-
-    pub fn with_application_info(mut self, application_info: Option<&'a ApplicationInfo>) -> Self {
-        self.application_info = application_info;
+    pub fn with_application_info(mut self, application_info: &'a ApplicationInfo) -> Self {
+        self.application_info = Some(application_info);
         self
     }
 
@@ -278,7 +265,10 @@ impl<'a> VulkanInstanceBuilder<'a> {
             khr::Win32Surface::name().as_ptr(),
         ];
 
-        if self.debug {
+        let debug_enabled = self.debug_options.debug_type != DebugType::none()
+            && self.debug_options.debug_severity != DebugSeverity::none();
+
+        if debug_enabled {
             let debug_layer = CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0").unwrap();
             layers.push(debug_layer.as_ptr());
             extensions.push(ext::DebugUtils::name().as_ptr())
@@ -295,10 +285,10 @@ impl<'a> VulkanInstanceBuilder<'a> {
         let instance = unsafe { entry.create_instance(&create_info, None) }
             .map_err(|err| VulkanError::InstanceCreationError(err.to_string()))?;
 
-        let (debug_utils, messenger) = if self.debug {
+        let (debug_utils, messenger) = if debug_enabled {
             let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                .message_severity(self.debug_severity.into())
-                .message_type(self.debug_type.into())
+                .message_severity(self.debug_options.debug_severity.into())
+                .message_type(self.debug_options.debug_type.into())
                 .pfn_user_callback(Some(VulkanInstance::vulkan_debug_callback))
                 .build();
 

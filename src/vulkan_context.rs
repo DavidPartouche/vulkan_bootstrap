@@ -1,32 +1,34 @@
 use std::os::raw::c_void;
-use std::ptr::null;
 use std::rc::Rc;
 
 use ash::vk;
 
 use crate::buffer::{Buffer, BufferBuilder, BufferType};
 use crate::command_buffers::{CommandBuffers, CommandBuffersBuilder};
-use crate::debug::{DebugSeverity, DebugType};
+use crate::debug::DebugOptions;
 use crate::depth_resources::{DepthResources, DepthResourcesBuilder};
 use crate::device::{VulkanDevice, VulkanDeviceBuilder};
 use crate::errors::VulkanError;
 use crate::extensions::DeviceExtensions;
+use crate::features::Features;
 use crate::frame_buffer::{FrameBuffers, FrameBuffersBuilder};
 use crate::instance::{ApplicationInfo, VulkanInstance, VulkanInstanceBuilder};
 use crate::physical_device::{PhysicalDevice, PhysicalDeviceBuilder};
 use crate::render_pass::{RenderPass, RenderPassBuilder};
 use crate::surface::{Surface, SurfaceBuilder};
 use crate::swapchain::{Swapchain, SwapchainBuilder};
+use crate::windows::Win32Window;
+use std::mem;
 
 pub struct VulkanContext {
-    frame_buffers: FrameBuffers,
-    render_pass: RenderPass,
-    _depth_resources: DepthResources,
-    swapchain: Swapchain,
+    frame_buffers: Option<FrameBuffers>,
+    render_pass: Option<RenderPass>,
+    depth_resources: Option<DepthResources>,
+    swapchain: Option<Swapchain>,
     command_buffers: CommandBuffers,
     device: Rc<VulkanDevice>,
     physical_device: PhysicalDevice,
-    _surface: Surface,
+    surface: Surface,
     instance: Rc<VulkanInstance>,
     frame_index: usize,
     frames_count: usize,
@@ -36,14 +38,17 @@ pub struct VulkanContext {
 
 impl Drop for VulkanContext {
     fn drop(&mut self) {
-        self.device.graphics_queue_wait_idle().unwrap();
-        self.device.present_queue_wait_idle().unwrap();
+        self.device.queue_wait_idle().unwrap();
     }
 }
 
 impl VulkanContext {
     pub fn get_instance(&self) -> &Rc<VulkanInstance> {
         &self.instance
+    }
+
+    pub fn get_surface(&self) -> &Surface {
+        &self.surface
     }
 
     pub fn get_physical_device(&self) -> &PhysicalDevice {
@@ -55,11 +60,15 @@ impl VulkanContext {
     }
 
     pub fn get_swapchain(&self) -> &Swapchain {
-        &self.swapchain
+        self.swapchain.as_ref().unwrap()
     }
 
-    pub fn get_command_buffers(&self) -> &CommandBuffers {
-        &self.command_buffers
+    pub fn get_depth_resources(&self) -> &DepthResources {
+        self.depth_resources.as_ref().unwrap()
+    }
+
+    pub fn get_render_pass(&self) -> &RenderPass {
+        self.render_pass.as_ref().unwrap()
     }
 
     pub fn get_current_command_buffer(&self) -> vk::CommandBuffer {
@@ -67,11 +76,17 @@ impl VulkanContext {
     }
 
     pub fn get_current_back_buffer(&self) -> vk::Image {
-        self.swapchain.get_image(self.back_buffer_index)
+        self.swapchain
+            .as_ref()
+            .unwrap()
+            .get_image(self.back_buffer_index)
     }
 
     pub fn get_current_back_buffer_view(&self) -> vk::ImageView {
-        self.swapchain.get_image_view(self.back_buffer_index)
+        self.swapchain
+            .as_ref()
+            .unwrap()
+            .get_image_view(self.back_buffer_index)
     }
 
     pub fn set_clear_value(&mut self, clear_value: [f32; 4]) {
@@ -105,7 +120,7 @@ impl VulkanContext {
     pub fn frame_begin(&mut self) -> Result<(), VulkanError> {
         self.command_buffers.wait_for_fence(self.frame_index)?;
 
-        self.back_buffer_index = self.swapchain.acquire_next_image(
+        self.back_buffer_index = self.swapchain.as_ref().unwrap().acquire_next_image(
             self.command_buffers
                 .get_present_complete_semaphore(self.frame_index),
         )?;
@@ -120,7 +135,7 @@ impl VulkanContext {
     }
 
     pub fn frame_present(&mut self) -> Result<(), VulkanError> {
-        self.swapchain.queue_present(
+        self.swapchain.as_ref().unwrap().queue_present(
             self.command_buffers
                 .get_render_complete_semaphore(self.frame_index),
             self.back_buffer_index as u32,
@@ -142,11 +157,16 @@ impl VulkanContext {
                 .build(),
         };
         let info = vk::RenderPassBeginInfo::builder()
-            .render_pass(self.render_pass.get())
-            .framebuffer(self.frame_buffers.get(self.back_buffer_index))
+            .render_pass(self.render_pass.as_ref().unwrap().get())
+            .framebuffer(
+                self.frame_buffers
+                    .as_ref()
+                    .unwrap()
+                    .get(self.back_buffer_index),
+            )
             .render_area(
                 vk::Rect2D::builder()
-                    .extent(self.swapchain.get_extent())
+                    .extent(self.swapchain.as_ref().unwrap().get_extent())
                     .build(),
             )
             .clear_values(&[clear_color, clear_depth])
@@ -171,79 +191,111 @@ impl VulkanContext {
         self.command_buffers
             .end_single_time_commands(command_buffer)
     }
+
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), VulkanError> {
+        self.device.queue_wait_idle()?;
+
+        if let Some(frame_buffers) = self.frame_buffers.take() {
+            mem::drop(frame_buffers);
+        }
+
+        if let Some(render_pass) = self.render_pass.take() {
+            mem::drop(render_pass);
+        }
+
+        if let Some(depth_resources) = self.depth_resources.take() {
+            mem::drop(depth_resources);
+        }
+
+        let old_swapchain = self.swapchain.take();
+        self.swapchain = Some(self.create_swapchain(old_swapchain, width, height)?);
+
+        self.depth_resources = Some(self.create_depth_resources(width, height)?);
+
+        self.render_pass = Some(self.create_render_pass()?);
+
+        self.frame_buffers = Some(self.create_frame_buffers(width, height)?);
+
+        Ok(())
+    }
+
+    fn create_swapchain(
+        &mut self,
+        old_swapchain: Option<Swapchain>,
+        width: u32,
+        height: u32,
+    ) -> Result<Swapchain, VulkanError> {
+        SwapchainBuilder::new(self)
+            .with_old_swapchain(old_swapchain)
+            .with_width(width)
+            .with_height(height)
+            .with_frames_count(self.frames_count as u32)
+            .build()
+    }
+
+    fn create_depth_resources(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<DepthResources, VulkanError> {
+        DepthResourcesBuilder::new(self)
+            .with_width(width)
+            .with_height(height)
+            .build()
+    }
+
+    fn create_render_pass(&self) -> Result<RenderPass, VulkanError> {
+        RenderPassBuilder::new(self).build()
+    }
+
+    fn create_frame_buffers(&self, width: u32, height: u32) -> Result<FrameBuffers, VulkanError> {
+        FrameBuffersBuilder::new(self)
+            .with_width(width)
+            .with_height(height)
+            .with_frames_count(self.frames_count as u32)
+            .build()
+    }
 }
 
-pub struct VulkanContextBuilder<'a> {
-    debug: bool,
-    debug_severity: DebugSeverity,
-    debug_type: DebugType,
-    hinstance: *const c_void,
-    hwnd: *const c_void,
-    width: u32,
-    height: u32,
+pub struct VulkanContextBuilder {
+    application_info: ApplicationInfo,
+    debug_options: DebugOptions,
+    window: Win32Window,
     extensions: Vec<DeviceExtensions>,
+    features: Features,
     frames_count: u32,
-    application_info: Option<&'a ApplicationInfo>,
-    sampler_anisotropy: bool,
-    runtime_descriptor_array: bool,
 }
 
-impl<'a> Default for VulkanContextBuilder<'a> {
+impl Default for VulkanContextBuilder {
     fn default() -> Self {
         VulkanContextBuilder {
-            debug: false,
-            debug_severity: DebugSeverity::default(),
-            debug_type: DebugType::default(),
-            hinstance: null(),
-            hwnd: null(),
-            width: 0,
-            height: 0,
+            application_info: ApplicationInfo::default(),
+            debug_options: DebugOptions::default(),
+            window: Win32Window::default(),
+            features: Features::default(),
             extensions: vec![],
             frames_count: 2,
-            application_info: None,
-            sampler_anisotropy: false,
-            runtime_descriptor_array: false,
         }
     }
 }
 
-impl<'a> VulkanContextBuilder<'a> {
+impl VulkanContextBuilder {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_debug_enabled(mut self, debug: bool) -> Self {
-        self.debug = debug;
+    pub fn with_application_info(mut self, application_info: ApplicationInfo) -> Self {
+        self.application_info = application_info.clone();
         self
     }
 
-    pub fn with_debug_severity(mut self, debug_severity: DebugSeverity) -> Self {
-        self.debug_severity = debug_severity;
+    pub fn with_debug_options(mut self, debug_options: DebugOptions) -> Self {
+        self.debug_options = debug_options;
         self
     }
 
-    pub fn with_debug_type(mut self, debug_type: DebugType) -> Self {
-        self.debug_type = debug_type;
-        self
-    }
-
-    pub fn with_hinstance(mut self, hinstance: *const c_void) -> Self {
-        self.hinstance = hinstance;
-        self
-    }
-
-    pub fn with_hwnd(mut self, hwnd: *const c_void) -> Self {
-        self.hwnd = hwnd;
-        self
-    }
-
-    pub fn with_width(mut self, width: u32) -> Self {
-        self.width = width;
-        self
-    }
-
-    pub fn with_height(mut self, height: u32) -> Self {
-        self.height = height;
+    pub fn with_window(mut self, window: Win32Window) -> Self {
+        self.window = window;
         self
     }
 
@@ -252,23 +304,13 @@ impl<'a> VulkanContextBuilder<'a> {
         self
     }
 
+    pub fn with_features(mut self, features: Features) -> Self {
+        self.features = features;
+        self
+    }
+
     pub fn with_frames_count(mut self, frames_count: u32) -> Self {
         self.frames_count = frames_count;
-        self
-    }
-
-    pub fn with_application_name(mut self, application_info: &'a ApplicationInfo) -> Self {
-        self.application_info = Some(application_info);
-        self
-    }
-
-    pub fn with_sampler_anisotropy(mut self, sampler_anisotropy: bool) -> Self {
-        self.sampler_anisotropy = sampler_anisotropy;
-        self
-    }
-
-    pub fn with_runtime_descriptor_array(mut self, runtime_descriptor_array: bool) -> Self {
-        self.runtime_descriptor_array = runtime_descriptor_array;
         self
     }
 
@@ -283,55 +325,37 @@ impl<'a> VulkanContextBuilder<'a> {
 
         let command_buffers = self.create_command_buffers(&physical_device, Rc::clone(&device))?;
 
-        let swapchain = self.create_swapchain(Rc::clone(&device), &surface, &physical_device)?;
-
-        let depth_resources = self.create_depth_resources(
-            &instance,
-            &physical_device,
-            Rc::clone(&device),
-            &command_buffers,
-        )?;
-
-        let render_pass =
-            self.create_render_pass(Rc::clone(&device), &swapchain, &depth_resources)?;
-
-        let frame_buffers = self.create_frame_buffers(
-            Rc::clone(&device),
-            &render_pass,
-            &swapchain,
-            &depth_resources,
-        )?;
-
-        Ok(VulkanContext {
+        let mut context = VulkanContext {
             instance,
-            _surface: surface,
+            surface,
             physical_device,
             device,
             command_buffers,
-            swapchain,
-            _depth_resources: depth_resources,
-            render_pass,
-            frame_buffers,
+            swapchain: None,
+            depth_resources: None,
+            render_pass: None,
+            frame_buffers: None,
             frame_index: 0,
             frames_count: self.frames_count as usize,
             back_buffer_index: 0,
             clear_value: [1.0, 1.0, 1.0, 1.0],
-        })
+        };
+
+        context.resize(self.window.width, self.window.height)?;
+
+        Ok(context)
     }
 
     fn create_instance(&self) -> Result<VulkanInstance, VulkanError> {
         VulkanInstanceBuilder::new()
-            .with_debug_enabled(self.debug)
-            .with_debug_severity(self.debug_severity)
-            .with_debug_type(self.debug_type)
-            .with_application_info(self.application_info)
+            .with_debug_options(self.debug_options)
+            .with_application_info(&self.application_info)
             .build()
     }
 
     fn create_surface(&self, instance: &VulkanInstance) -> Result<Surface, VulkanError> {
         SurfaceBuilder::new(instance)
-            .with_hinstance(self.hinstance)
-            .with_hwnd(self.hwnd)
+            .with_window(self.window)
             .build()
     }
 
@@ -342,7 +366,7 @@ impl<'a> VulkanContextBuilder<'a> {
     ) -> Result<PhysicalDevice, VulkanError> {
         PhysicalDeviceBuilder::new(instance, surface)
             .with_extensions(&self.extensions)
-            .with_sampler_anisotropy(self.sampler_anisotropy)
+            .with_features(self.features)
             .build()
     }
 
@@ -353,8 +377,7 @@ impl<'a> VulkanContextBuilder<'a> {
     ) -> Result<VulkanDevice, VulkanError> {
         VulkanDeviceBuilder::new(instance, physical_device)
             .with_extensions(&self.extensions)
-            .with_sampler_anisotropy(self.sampler_anisotropy)
-            .with_runtime_descriptor_array(self.runtime_descriptor_array)
+            .with_features(self.features)
             .build()
     }
 
@@ -364,55 +387,6 @@ impl<'a> VulkanContextBuilder<'a> {
         device: Rc<VulkanDevice>,
     ) -> Result<CommandBuffers, VulkanError> {
         CommandBuffersBuilder::new(physical_device, device)
-            .with_buffer_count(self.frames_count)
-            .build()
-    }
-
-    fn create_swapchain(
-        &self,
-        device: Rc<VulkanDevice>,
-        surface: &Surface,
-        physical_device: &PhysicalDevice,
-    ) -> Result<Swapchain, VulkanError> {
-        SwapchainBuilder::new(device, surface, physical_device)
-            .with_width(self.width)
-            .with_height(self.height)
-            .with_frames_count(self.frames_count)
-            .build()
-    }
-
-    fn create_depth_resources(
-        &self,
-        instance: &VulkanInstance,
-        physical_device: &PhysicalDevice,
-        device: Rc<VulkanDevice>,
-        command_buffers: &CommandBuffers,
-    ) -> Result<DepthResources, VulkanError> {
-        DepthResourcesBuilder::new(instance, physical_device, device, command_buffers)
-            .with_width(self.width)
-            .with_height(self.height)
-            .build()
-    }
-
-    fn create_render_pass(
-        &self,
-        device: Rc<VulkanDevice>,
-        swapchain: &Swapchain,
-        depth_resources: &DepthResources,
-    ) -> Result<RenderPass, VulkanError> {
-        RenderPassBuilder::new(device, swapchain, depth_resources).build()
-    }
-
-    fn create_frame_buffers(
-        &self,
-        device: Rc<VulkanDevice>,
-        render_pass: &RenderPass,
-        swapchain: &Swapchain,
-        depth_resources: &DepthResources,
-    ) -> Result<FrameBuffers, VulkanError> {
-        FrameBuffersBuilder::new(device, render_pass, swapchain, depth_resources)
-            .with_width(self.width)
-            .with_height(self.height)
             .with_frames_count(self.frames_count)
             .build()
     }

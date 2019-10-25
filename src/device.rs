@@ -8,6 +8,7 @@ use ash::vk::PhysicalDeviceDescriptorIndexingFeaturesEXT;
 
 use crate::errors::VulkanError;
 use crate::extensions::DeviceExtensions;
+use crate::features::Features;
 use crate::instance::VulkanInstance;
 use crate::physical_device::PhysicalDevice;
 
@@ -16,8 +17,7 @@ const FENCE_TIMEOUT: u64 = 100;
 pub struct VulkanDevice {
     instance: Rc<VulkanInstance>,
     device: ash::Device,
-    graphics_queue: vk::Queue,
-    present_queue: vk::Queue,
+    queue: vk::Queue,
 }
 
 impl Drop for VulkanDevice {
@@ -33,52 +33,23 @@ impl VulkanDevice {
         &self.device
     }
 
-    pub fn get_graphics_queue(&self) -> vk::Queue {
-        self.graphics_queue
+    pub fn get_queue(&self) -> vk::Queue {
+        self.queue
     }
 
-    pub fn get_present_queue(&self) -> vk::Queue {
-        self.present_queue
-    }
-
-    pub fn graphics_queue_wait_idle(&self) -> Result<(), VulkanError> {
-        self.queue_wait_idle(self.graphics_queue)
-    }
-
-    pub fn present_queue_wait_idle(&self) -> Result<(), VulkanError> {
-        self.queue_wait_idle(self.present_queue)
-    }
-
-    fn queue_wait_idle(&self, queue: vk::Queue) -> Result<(), VulkanError> {
-        unsafe { self.device.queue_wait_idle(queue) }
+    pub fn queue_wait_idle(&self) -> Result<(), VulkanError> {
+        unsafe { self.device.queue_wait_idle(self.queue) }
             .map_err(|err| VulkanError::DeviceError(err.to_string()))?;
 
         Ok(())
     }
 
-    pub fn graphics_queue_submit(
+    pub fn queue_submit(
         &self,
         submit_info: &[vk::SubmitInfo],
         fence: vk::Fence,
     ) -> Result<(), VulkanError> {
-        self.queue_submit(self.graphics_queue, submit_info, fence)
-    }
-
-    pub fn present_queue_submit(
-        &self,
-        submit_info: &[vk::SubmitInfo],
-        fence: vk::Fence,
-    ) -> Result<(), VulkanError> {
-        self.queue_submit(self.present_queue, submit_info, fence)
-    }
-
-    fn queue_submit(
-        &self,
-        queue: vk::Queue,
-        submit_info: &[vk::SubmitInfo],
-        fence: vk::Fence,
-    ) -> Result<(), VulkanError> {
-        unsafe { self.device.queue_submit(queue, submit_info, fence) }
+        unsafe { self.device.queue_submit(self.queue, submit_info, fence) }
             .map_err(|err| VulkanError::DeviceError(err.to_string()))?;
 
         Ok(())
@@ -488,8 +459,7 @@ pub struct VulkanDeviceBuilder<'a> {
     instance: Rc<VulkanInstance>,
     physical_device: &'a PhysicalDevice,
     extensions: Vec<DeviceExtensions>,
-    sampler_anisotropy: bool,
-    runtime_descriptor_array: bool,
+    features: Features,
 }
 
 impl<'a> VulkanDeviceBuilder<'a> {
@@ -498,8 +468,7 @@ impl<'a> VulkanDeviceBuilder<'a> {
             instance,
             physical_device,
             extensions: vec![],
-            sampler_anisotropy: false,
-            runtime_descriptor_array: false,
+            features: Features::default(),
         }
     }
 
@@ -508,27 +477,15 @@ impl<'a> VulkanDeviceBuilder<'a> {
         self
     }
 
-    pub fn with_sampler_anisotropy(mut self, sampler_anisotropy: bool) -> Self {
-        self.sampler_anisotropy = sampler_anisotropy;
-        self
-    }
-
-    pub fn with_runtime_descriptor_array(mut self, runtime_descriptor_array: bool) -> Self {
-        self.runtime_descriptor_array = runtime_descriptor_array;
+    pub fn with_features(mut self, features: Features) -> Self {
+        self.features = features;
         self
     }
 
     pub fn build(self) -> Result<VulkanDevice, VulkanError> {
-        let queue_priority = [1.];
-
-        let graphics_queue_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(self.physical_device.get_graphics_queue_family())
-            .queue_priorities(&queue_priority)
-            .build();
-
-        let present_queue_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(self.physical_device.get_present_queue_family())
-            .queue_priorities(&queue_priority)
+        let queue_info = vk::DeviceQueueCreateInfo::builder()
+            .queue_family_index(self.physical_device.get_queue_family())
+            .queue_priorities(&[1.0])
             .build();
 
         let extension_names: Vec<*const c_char> = self
@@ -538,15 +495,17 @@ impl<'a> VulkanDeviceBuilder<'a> {
             .collect();
 
         let mut desc_index_features = PhysicalDeviceDescriptorIndexingFeaturesEXT::builder()
-            .runtime_descriptor_array(self.runtime_descriptor_array)
+            .runtime_descriptor_array(self.features.runtime_descriptor_array)
             .build();
 
         let required_features = vk::PhysicalDeviceFeatures::builder()
-            .sampler_anisotropy(self.sampler_anisotropy)
+            .geometry_shader(self.features.geometry_shader)
+            .sampler_anisotropy(self.features.sampler_anisotropy)
+            .tessellation_shader(self.features.tessellation_shader)
             .build();
 
         let create_info = vk::DeviceCreateInfo::builder()
-            .queue_create_infos(&[graphics_queue_info, present_queue_info])
+            .queue_create_infos(&[queue_info])
             .enabled_extension_names(&extension_names)
             .enabled_features(&required_features)
             .push_next(&mut desc_index_features)
@@ -556,16 +515,12 @@ impl<'a> VulkanDeviceBuilder<'a> {
             .instance
             .create_device(self.physical_device.get(), &create_info)?;
 
-        let graphics_queue =
-            unsafe { device.get_device_queue(self.physical_device.get_graphics_queue_family(), 0) };
-        let present_queue =
-            unsafe { device.get_device_queue(self.physical_device.get_present_queue_family(), 0) };
+        let queue = unsafe { device.get_device_queue(self.physical_device.get_queue_family(), 0) };
 
         Ok(VulkanDevice {
             instance: self.instance,
             device,
-            graphics_queue,
-            present_queue,
+            queue,
         })
     }
 }

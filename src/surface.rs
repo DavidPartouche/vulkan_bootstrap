@@ -1,10 +1,9 @@
-use std::ptr::null;
-
 use ash::extensions::khr;
 use ash::vk;
 
 use crate::errors::VulkanError;
 use crate::instance::VulkanInstance;
+use crate::windows::Win32Window;
 
 pub struct SwapchainSupportDetails {
     pub capabilities: vk::SurfaceCapabilitiesKHR,
@@ -92,33 +91,26 @@ impl Surface {
 
 pub struct SurfaceBuilder<'a> {
     instance: &'a VulkanInstance,
-    hinstance: vk::HINSTANCE,
-    hwnd: vk::HWND,
+    window: Win32Window,
 }
 
 impl<'a> SurfaceBuilder<'a> {
     pub fn new(instance: &'a VulkanInstance) -> Self {
         SurfaceBuilder {
             instance,
-            hinstance: null(),
-            hwnd: null(),
+            window: Win32Window::default(),
         }
     }
 
-    pub fn with_hinstance(mut self, hinstance: vk::HINSTANCE) -> Self {
-        self.hinstance = hinstance;
-        self
-    }
-
-    pub fn with_hwnd(mut self, hwnd: vk::HWND) -> Self {
-        self.hwnd = hwnd;
+    pub fn with_window(mut self, window: Win32Window) -> Self {
+        self.window = window;
         self
     }
 
     pub fn build(self) -> Result<Surface, VulkanError> {
         let (surface_loader, surface) = self
             .instance
-            .create_win_32_surface(self.hinstance, self.hwnd)?;
+            .create_win_32_surface(self.window.hinstance, self.window.hwnd)?;
 
         Ok(Surface {
             surface_loader,

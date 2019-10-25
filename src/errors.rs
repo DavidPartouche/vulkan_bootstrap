@@ -3,20 +3,21 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum VulkanError {
-    InstanceCreationError(String),
     DebugCreationError(String),
-    InstanceError(String),
-    SurfaceError(String),
-    PhysicalDeviceCreationError(String),
-    DeviceError(String),
-    SwapchainCreationError(String),
-    RenderPassCreationError(String),
     DepthResourcesCreationError(String),
-    SwapchainError(String),
-    ShaderCreationError(String),
-    VertexBufferCreationError(String),
+    DeviceError(String),
     ImageCreationError(String),
+    InstanceCreationError(String),
+    InstanceError(String),
+    PipelineError(String),
+    PhysicalDeviceCreationError(String),
+    RenderPassCreationError(String),
+    ShaderCreationError(String),
+    SurfaceError(String),
+    SwapchainCreationError(String),
+    SwapchainError(String),
     TextureCreationError(String),
+    VertexBufferCreationError(String),
 }
 
 impl Display for VulkanError {

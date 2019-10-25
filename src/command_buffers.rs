@@ -73,8 +73,8 @@ impl CommandBuffers {
             .build();
 
         self.device
-            .graphics_queue_submit(&[submit_info], vk::Fence::null())?;
-        self.device.graphics_queue_wait_idle()?;
+            .queue_submit(&[submit_info], vk::Fence::null())?;
+        self.device.queue_wait_idle()?;
 
         self.device
             .free_command_buffers(self.command_pool, &[command_buffer]);
@@ -111,8 +111,7 @@ impl CommandBuffers {
             .signal_semaphores(&[self.render_complete_semaphores[frame_index]])
             .build();
 
-        self.device
-            .graphics_queue_submit(&[info], self.fences[frame_index])
+        self.device.queue_submit(&[info], self.fences[frame_index])
     }
 
     pub fn copy_buffer(
@@ -132,7 +131,7 @@ impl CommandBuffers {
 pub struct CommandBuffersBuilder<'a> {
     physical_device: &'a PhysicalDevice,
     device: Rc<VulkanDevice>,
-    buffer_count: u32,
+    frames_count: u32,
 }
 
 impl<'a> CommandBuffersBuilder<'a> {
@@ -140,12 +139,12 @@ impl<'a> CommandBuffersBuilder<'a> {
         Self {
             physical_device,
             device,
-            buffer_count: 1,
+            frames_count: 1,
         }
     }
 
-    pub fn with_buffer_count(mut self, buffer_count: u32) -> Self {
-        self.buffer_count = buffer_count;
+    pub fn with_frames_count(mut self, frames_count: u32) -> Self {
+        self.frames_count = frames_count;
         self
     }
 
@@ -156,19 +155,19 @@ impl<'a> CommandBuffersBuilder<'a> {
 
         let pool_info = vk::CommandPoolCreateInfo::builder()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(self.physical_device.get_graphics_queue_family())
+            .queue_family_index(self.physical_device.get_queue_family())
             .build();
         let command_pool = self.device.create_command_pool(&pool_info)?;
 
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_pool(command_pool)
-            .command_buffer_count(self.buffer_count)
+            .command_buffer_count(self.frames_count)
             .build();
 
         let command_buffers = self.device.allocate_command_buffers(&alloc_info)?;
 
-        for _ in 0..self.buffer_count {
+        for _ in 0..self.frames_count {
             let fence_info = vk::FenceCreateInfo::builder()
                 .flags(vk::FenceCreateFlags::SIGNALED)
                 .build();

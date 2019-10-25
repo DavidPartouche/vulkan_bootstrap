@@ -71,9 +71,7 @@ impl<'a> TextureBuilder<'a> {
         staging_buffer.copy_data(data)?;
 
         let (texture_image, texture_image_memory) = image::create_image(
-            self.context.get_instance(),
-            self.context.get_device(),
-            self.context.get_physical_device(),
+            self.context,
             image.tex_width,
             image.tex_height,
             vk::Format::R8G8B8A8_UNORM,
@@ -83,8 +81,7 @@ impl<'a> TextureBuilder<'a> {
         )?;
 
         image::transition_image_layout(
-            self.context.get_device(),
-            self.context.get_command_buffers(),
+            self.context,
             texture_image,
             vk::Format::R8G8B8A8_UNORM,
             vk::ImageLayout::UNDEFINED,
@@ -99,8 +96,7 @@ impl<'a> TextureBuilder<'a> {
         )?;
 
         image::transition_image_layout(
-            self.context.get_device(),
-            self.context.get_command_buffers(),
+            self.context,
             texture_image,
             vk::Format::R8G8B8A8_UNORM,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -108,7 +104,7 @@ impl<'a> TextureBuilder<'a> {
         )?;
 
         let texture_image_view = image::create_image_view(
-            self.context.get_device(),
+            self.context,
             texture_image,
             vk::Format::R8G8B8A8_UNORM,
             vk::ImageAspectFlags::COLOR,

@@ -1,10 +1,7 @@
 use ash::vk;
 
-use crate::command_buffers::CommandBuffers;
-use crate::device::VulkanDevice;
 use crate::errors::VulkanError;
-use crate::instance::VulkanInstance;
-use crate::physical_device::PhysicalDevice;
+use crate::vulkan_context::VulkanContext;
 
 pub struct Image {
     pub pixels: Vec<u8>,
@@ -13,10 +10,8 @@ pub struct Image {
     pub tex_channels: u32,
 }
 
-pub(crate) fn create_image(
-    instance: &VulkanInstance,
-    device: &VulkanDevice,
-    physical_device: &PhysicalDevice,
+pub fn create_image(
+    context: &VulkanContext,
     width: u32,
     height: u32,
     format: vk::Format,
@@ -43,12 +38,13 @@ pub(crate) fn create_image(
         .sharing_mode(vk::SharingMode::EXCLUSIVE)
         .build();
 
-    let image = device.create_image(&image_info)?;
-    let mem_requirements = device.get_image_memory_requirements(image);
+    let image = context.get_device().create_image(&image_info)?;
+    let mem_requirements = context.get_device().get_image_memory_requirements(image);
 
-    let memory_type_index = instance
+    let memory_type_index = context
+        .get_instance()
         .find_memory_type(
-            physical_device.get(),
+            context.get_physical_device().get(),
             mem_requirements.memory_type_bits,
             properties,
         )
@@ -60,15 +56,17 @@ pub(crate) fn create_image(
         .allocation_size(mem_requirements.size)
         .memory_type_index(memory_type_index)
         .build();
-    let image_memory = device.allocate_memory(&alloc_info)?;
+    let image_memory = context.get_device().allocate_memory(&alloc_info)?;
 
-    device.bind_image_memory(image, image_memory)?;
+    context
+        .get_device()
+        .bind_image_memory(image, image_memory)?;
 
     Ok((image, image_memory))
 }
 
-pub(crate) fn create_image_view(
-    device: &VulkanDevice,
+pub fn create_image_view(
+    context: &VulkanContext,
     image: vk::Image,
     format: vk::Format,
     aspect_flags: vk::ImageAspectFlags,
@@ -88,18 +86,17 @@ pub(crate) fn create_image_view(
         )
         .build();
 
-    device.create_image_view(&view_info)
+    context.get_device().create_image_view(&view_info)
 }
 
-pub(crate) fn transition_image_layout(
-    device: &VulkanDevice,
-    command_buffers: &CommandBuffers,
+pub fn transition_image_layout(
+    context: &VulkanContext,
     image: vk::Image,
     format: vk::Format,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
 ) -> Result<(), VulkanError> {
-    let command_buffer = command_buffers.begin_single_time_commands()?;
+    let command_buffer = context.begin_single_time_commands()?;
 
     let aspect_mask = if new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
         if format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT {
@@ -166,7 +163,7 @@ pub(crate) fn transition_image_layout(
         .dst_access_mask(dst_access_mask)
         .build();
 
-    device.cmd_pipeline_barrier(
+    context.get_device().cmd_pipeline_barrier(
         command_buffer,
         src_stage,
         dst_stage,
@@ -176,5 +173,5 @@ pub(crate) fn transition_image_layout(
         &[barrier],
     );
 
-    command_buffers.end_single_time_commands(command_buffer)
+    context.end_single_time_commands(command_buffer)
 }

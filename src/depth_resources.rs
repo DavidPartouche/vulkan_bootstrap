@@ -2,12 +2,10 @@ use std::rc::Rc;
 
 use ash::vk;
 
-use crate::command_buffers::CommandBuffers;
 use crate::device::VulkanDevice;
 use crate::errors::VulkanError;
 use crate::image;
-use crate::instance::VulkanInstance;
-use crate::physical_device::PhysicalDevice;
+use crate::vulkan_context::VulkanContext;
 
 pub struct DepthResources {
     device: Rc<VulkanDevice>,
@@ -36,26 +34,15 @@ impl DepthResources {
 }
 
 pub struct DepthResourcesBuilder<'a> {
-    instance: &'a VulkanInstance,
-    physical_device: &'a PhysicalDevice,
-    device: Rc<VulkanDevice>,
-    command_buffers: &'a CommandBuffers,
+    context: &'a VulkanContext,
     width: u32,
     height: u32,
 }
 
 impl<'a> DepthResourcesBuilder<'a> {
-    pub fn new(
-        instance: &'a VulkanInstance,
-        physical_device: &'a PhysicalDevice,
-        device: Rc<VulkanDevice>,
-        command_buffers: &'a CommandBuffers,
-    ) -> Self {
+    pub fn new(context: &'a VulkanContext) -> Self {
         DepthResourcesBuilder {
-            instance,
-            physical_device,
-            device,
-            command_buffers,
+            context,
             width: 0,
             height: 0,
         }
@@ -78,9 +65,7 @@ impl<'a> DepthResourcesBuilder<'a> {
         );
 
         let (depth_image, depth_image_memory) = image::create_image(
-            self.instance,
-            &self.device,
-            &self.physical_device,
+            self.context,
             self.width,
             self.height,
             depth_format,
@@ -90,15 +75,14 @@ impl<'a> DepthResourcesBuilder<'a> {
         )?;
 
         let depth_image_view = image::create_image_view(
-            &self.device,
+            self.context,
             depth_image,
             depth_format,
             vk::ImageAspectFlags::DEPTH,
         )?;
 
         image::transition_image_layout(
-            &self.device,
-            self.command_buffers,
+            self.context,
             depth_image,
             depth_format,
             vk::ImageLayout::UNDEFINED,
@@ -106,7 +90,7 @@ impl<'a> DepthResourcesBuilder<'a> {
         )?;
 
         Ok(DepthResources {
-            device: self.device,
+            device: Rc::clone(self.context.get_device()),
             depth_format,
             depth_image,
             depth_image_memory,
@@ -128,8 +112,12 @@ impl<'a> DepthResourcesBuilder<'a> {
             .into_iter()
             .find(|format| {
                 let props = self
-                    .instance
-                    .get_physical_device_format_properties(self.physical_device.get(), *format);
+                    .context
+                    .get_instance()
+                    .get_physical_device_format_properties(
+                        self.context.get_physical_device().get(),
+                        *format,
+                    );
 
                 (tiling == vk::ImageTiling::LINEAR
                     && props.linear_tiling_features.contains(features))

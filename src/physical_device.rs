@@ -2,26 +2,15 @@ use ash::vk;
 
 use crate::errors::VulkanError;
 use crate::extensions::DeviceExtensions;
+use crate::features::Features;
 use crate::instance::VulkanInstance;
 use crate::surface::Surface;
 use std::rc::Rc;
 
-struct QueueFamilyIndices {
-    pub graphics_family: Option<usize>,
-    pub present_family: Option<usize>,
-}
-
-impl QueueFamilyIndices {
-    pub fn is_complete(&self) -> bool {
-        self.graphics_family.is_some() && self.present_family.is_some()
-    }
-}
-
 pub struct PhysicalDevice {
     instance: Rc<VulkanInstance>,
     physical_device: vk::PhysicalDevice,
-    graphics_queue_family: u32,
-    present_queue_family: u32,
+    queue_family: u32,
 }
 
 impl PhysicalDevice {
@@ -29,12 +18,8 @@ impl PhysicalDevice {
         self.physical_device
     }
 
-    pub fn get_graphics_queue_family(&self) -> u32 {
-        self.graphics_queue_family
-    }
-
-    pub fn get_present_queue_family(&self) -> u32 {
-        self.present_queue_family
+    pub fn get_queue_family(&self) -> u32 {
+        self.queue_family
     }
 
     pub fn find_memory_type(
@@ -64,7 +49,7 @@ pub struct PhysicalDeviceBuilder<'a> {
     instance: Rc<VulkanInstance>,
     surface: &'a Surface,
     extensions: Vec<DeviceExtensions>,
-    sampler_anisotropy: bool,
+    features: Features,
 }
 
 impl<'a> PhysicalDeviceBuilder<'a> {
@@ -73,7 +58,7 @@ impl<'a> PhysicalDeviceBuilder<'a> {
             instance,
             surface,
             extensions: vec![],
-            sampler_anisotropy: false,
+            features: Features::default(),
         }
     }
 
@@ -82,8 +67,8 @@ impl<'a> PhysicalDeviceBuilder<'a> {
         self
     }
 
-    pub fn with_sampler_anisotropy(mut self, sampler_anisotropy: bool) -> Self {
-        self.sampler_anisotropy = sampler_anisotropy;
+    pub fn with_features(mut self, features: Features) -> Self {
+        self.features = features;
         self
     }
 
@@ -93,9 +78,9 @@ impl<'a> PhysicalDeviceBuilder<'a> {
         let (physical_device, queue_family) = physical_devices
             .into_iter()
             .find_map(|device| {
-                let queue_family_indices = self.find_queue_families(device);
-                if self.is_device_suitable(device) && queue_family_indices.is_complete() {
-                    Some((device, queue_family_indices))
+                let queue_family = self.find_queue_family(device);
+                if self.is_device_suitable(device) && queue_family.is_some() {
+                    Some((device, queue_family.unwrap()))
                 } else {
                     None
                 }
@@ -109,59 +94,35 @@ impl<'a> PhysicalDeviceBuilder<'a> {
         Ok(PhysicalDevice {
             instance: self.instance,
             physical_device,
-            graphics_queue_family: queue_family.graphics_family.unwrap() as u32,
-            present_queue_family: queue_family.present_family.unwrap() as u32,
+            queue_family,
         })
     }
 
     fn is_device_suitable(&self, device: vk::PhysicalDevice) -> bool {
         let swapchain_support = self.surface.query_swapchain_support(device).unwrap();
-        let sampler_anisotropy = if self.sampler_anisotropy {
-            self.instance
-                .get_physical_device_features(device)
-                .sampler_anisotropy
-                == vk::TRUE
-        } else {
-            true
-        };
 
         self.check_device_extensions_support(device)
+            && self.check_device_features_support(device)
             && !swapchain_support.formats.is_empty()
             && !swapchain_support.present_modes.is_empty()
-            && sampler_anisotropy
     }
 
-    fn find_queue_families(&self, device: vk::PhysicalDevice) -> QueueFamilyIndices {
+    fn find_queue_family(&self, device: vk::PhysicalDevice) -> Option<u32> {
         let queue_families = self
             .instance
             .get_physical_device_queue_family_properties(device);
 
-        let mut graphics_family = None;
-        let mut present_family = None;
-
         for (index, queue_family) in queue_families.iter().enumerate() {
             if queue_family.queue_count > 0
                 && queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                && self
+                    .surface
+                    .get_physical_device_surface_support(device, index as u32)
             {
-                graphics_family = Some(index);
-            }
-
-            if self
-                .surface
-                .get_physical_device_surface_support(device, index as u32)
-            {
-                present_family = Some(index);
-            }
-
-            if graphics_family.is_some() && present_family.is_some() {
-                break;
+                return Some(index as u32);
             }
         }
-
-        QueueFamilyIndices {
-            graphics_family,
-            present_family,
-        }
+        None
     }
 
     fn check_device_extensions_support(&self, device: vk::PhysicalDevice) -> bool {
@@ -181,5 +142,15 @@ impl<'a> PhysicalDeviceBuilder<'a> {
         }
 
         true
+    }
+
+    fn check_device_features_support(&self, device: vk::PhysicalDevice) -> bool {
+        let available_features = self.instance.get_physical_device_features(device);
+
+        (!self.features.geometry_shader || available_features.geometry_shader == vk::TRUE)
+            && (!self.features.sampler_anisotropy
+                || available_features.sampler_anisotropy == vk::TRUE)
+            && (!self.features.tessellation_shader
+                || available_features.tessellation_shader == vk::TRUE)
     }
 }

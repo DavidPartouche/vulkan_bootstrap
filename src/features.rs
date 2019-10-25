@@ -1,3 +1,4 @@
+#[derive(Default, Copy, Clone)]
 pub struct Features {
     pub geometry_shader: bool,
     pub tessellation_shader: bool,
