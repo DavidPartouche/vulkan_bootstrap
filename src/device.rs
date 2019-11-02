@@ -238,6 +238,17 @@ impl VulkanDevice {
         }
     }
 
+    pub fn create_graphics_pipelines(
+        &self,
+        infos: &[vk::GraphicsPipelineCreateInfo],
+    ) -> Result<Vec<vk::Pipeline>, VulkanError> {
+        unsafe {
+            self.device
+                .create_graphics_pipelines(vk::PipelineCache::null(), infos, None)
+        }
+        .map_err(|(_, err)| VulkanError::DeviceError(err.to_string()))
+    }
+
     pub fn destroy_pipeline(&self, pipeline: vk::Pipeline) {
         unsafe {
             self.device.destroy_pipeline(pipeline, None);
@@ -390,17 +401,49 @@ impl VulkanDevice {
         &self,
         command_buffer: vk::CommandBuffer,
         pipeline_layout: vk::PipelineLayout,
+        pipeline_bind_point: vk::PipelineBindPoint,
         descriptor_sets: &[vk::DescriptorSet],
     ) {
         unsafe {
             self.device.cmd_bind_descriptor_sets(
                 command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
+                pipeline_bind_point,
                 pipeline_layout,
                 0,
                 descriptor_sets,
                 &[],
             );
+        }
+    }
+
+    pub fn cmd_bind_vertex_buffers(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        buffers: &[vk::Buffer],
+        offsets: &[vk::DeviceSize],
+    ) {
+        unsafe {
+            self.device
+                .cmd_bind_vertex_buffers(command_buffer, 0, buffers, offsets);
+        }
+    }
+
+    pub fn cmd_bind_index_buffer(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        buffer: vk::Buffer,
+        offset: vk::DeviceSize,
+    ) {
+        unsafe {
+            self.device
+                .cmd_bind_index_buffer(command_buffer, buffer, offset, vk::IndexType::UINT32)
+        }
+    }
+
+    pub fn cmd_draw_index(&self, command_buffer: vk::CommandBuffer, index_count: u32) {
+        unsafe {
+            self.device
+                .cmd_draw_indexed(command_buffer, index_count, 1, 0, 0, 0);
         }
     }
 
@@ -502,6 +545,7 @@ impl<'a> VulkanDeviceBuilder<'a> {
             .geometry_shader(self.features.geometry_shader)
             .sampler_anisotropy(self.features.sampler_anisotropy)
             .tessellation_shader(self.features.tessellation_shader)
+            .fragment_stores_and_atomics(self.features.fragment_stores_and_atomics)
             .build();
 
         let create_info = vk::DeviceCreateInfo::builder()

@@ -3,13 +3,6 @@ use ash::vk;
 use crate::errors::VulkanError;
 use crate::vulkan_context::VulkanContext;
 
-pub struct Image {
-    pub pixels: Vec<u8>,
-    pub tex_width: u32,
-    pub tex_height: u32,
-    pub tex_channels: u32,
-}
-
 pub fn create_image(
     context: &VulkanContext,
     width: u32,

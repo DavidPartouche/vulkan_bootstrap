@@ -152,5 +152,7 @@ impl<'a> PhysicalDeviceBuilder<'a> {
                 || available_features.sampler_anisotropy == vk::TRUE)
             && (!self.features.tessellation_shader
                 || available_features.tessellation_shader == vk::TRUE)
+            && (!self.features.fragment_stores_and_atomics
+                || available_features.fragment_stores_and_atomics == vk::TRUE)
     }
 }

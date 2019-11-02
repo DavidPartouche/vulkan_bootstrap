@@ -7,7 +7,6 @@ use crate::buffer::{BufferBuilder, BufferType};
 use crate::device::VulkanDevice;
 use crate::errors::VulkanError;
 use crate::image;
-use crate::image::Image;
 use crate::vulkan_context::VulkanContext;
 
 pub struct Texture {
@@ -39,29 +38,39 @@ impl Texture {
 
 pub struct TextureBuilder<'a> {
     context: &'a VulkanContext,
-    image: Option<&'a Image>,
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
 }
 
 impl<'a> TextureBuilder<'a> {
     pub fn new(context: &'a VulkanContext) -> Self {
         TextureBuilder {
             context,
-            image: None,
+            width: 0,
+            height: 0,
+            pixels: vec![],
         }
     }
 
-    pub fn with_image(mut self, image: &'a Image) -> Self {
-        self.image = Some(image);
+    pub fn with_width(mut self, width: u32) -> Self {
+        self.width = width;
+        self
+    }
+
+    pub fn with_height(mut self, height: u32) -> Self {
+        self.height = height;
+        self
+    }
+
+    pub fn with_pixels(mut self, pixels: &[u8]) -> Self {
+        self.pixels.extend_from_slice(pixels);
         self
     }
 
     pub fn build(self) -> Result<Texture, VulkanError> {
-        let image = self
-            .image
-            .ok_or_else(|| VulkanError::TextureCreationError(String::from("No image provided")))?;
-
-        let image_size = (image.tex_width * image.tex_height * 4) as vk::DeviceSize;
-        let data = image.pixels.as_ptr() as *const c_void;
+        let image_size = (self.width * self.height * 4) as vk::DeviceSize;
+        let data = self.pixels.as_ptr() as *const c_void;
 
         let staging_buffer = BufferBuilder::new(self.context)
             .with_type(BufferType::Staging)
@@ -72,8 +81,8 @@ impl<'a> TextureBuilder<'a> {
 
         let (texture_image, texture_image_memory) = image::create_image(
             self.context,
-            image.tex_width,
-            image.tex_height,
+            self.width,
+            self.height,
             vk::Format::R8G8B8A8_UNORM,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -88,12 +97,7 @@ impl<'a> TextureBuilder<'a> {
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         )?;
 
-        self.copy_buffer_to_image(
-            staging_buffer.get(),
-            texture_image,
-            image.tex_width,
-            image.tex_height,
-        )?;
+        self.copy_buffer_to_image(staging_buffer.get(), texture_image, self.width, self.height)?;
 
         image::transition_image_layout(
             self.context,

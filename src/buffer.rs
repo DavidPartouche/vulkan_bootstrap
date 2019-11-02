@@ -91,9 +91,7 @@ impl<'a> BufferBuilder<'a> {
             BufferType::RayTracingInstance => vk::BufferUsageFlags::RAY_TRACING_NV,
             BufferType::ShaderBindingTable => vk::BufferUsageFlags::TRANSFER_SRC,
             BufferType::Staging => vk::BufferUsageFlags::TRANSFER_SRC,
-            BufferType::Storage => {
-                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_DST
-            }
+            BufferType::Storage => vk::BufferUsageFlags::STORAGE_BUFFER,
             BufferType::Uniform => vk::BufferUsageFlags::UNIFORM_BUFFER,
             BufferType::Vertex => {
                 vk::BufferUsageFlags::VERTEX_BUFFER

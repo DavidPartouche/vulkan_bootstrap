@@ -1,9 +1,7 @@
-use std::os::raw::c_void;
 use std::rc::Rc;
 
 use ash::vk;
 
-use crate::buffer::{Buffer, BufferBuilder, BufferType};
 use crate::command_buffers::{CommandBuffers, CommandBuffersBuilder};
 use crate::debug::DebugOptions;
 use crate::depth_resources::{DepthResources, DepthResourcesBuilder};
@@ -91,30 +89,6 @@ impl VulkanContext {
 
     pub fn set_clear_value(&mut self, clear_value: [f32; 4]) {
         self.clear_value = clear_value;
-    }
-
-    pub fn create_buffer(
-        &self,
-        ty: BufferType,
-        size: vk::DeviceSize,
-        data: *const c_void,
-    ) -> Result<Buffer, VulkanError> {
-        let staging_buffer = BufferBuilder::new(self)
-            .with_type(BufferType::Staging)
-            .with_size(size)
-            .build()?;
-
-        staging_buffer.copy_data(data)?;
-
-        let buffer = BufferBuilder::new(self)
-            .with_type(ty)
-            .with_size(size)
-            .build()?;
-
-        self.command_buffers
-            .copy_buffer(staging_buffer.get(), buffer.get(), size)?;
-
-        Ok(buffer)
     }
 
     pub fn frame_begin(&mut self) -> Result<(), VulkanError> {
