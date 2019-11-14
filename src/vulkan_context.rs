@@ -87,6 +87,10 @@ impl VulkanContext {
             .get_image_view(self.back_buffer_index)
     }
 
+    pub fn get_clear_value(&self) -> [f32; 4] {
+        self.clear_value
+    }
+
     pub fn set_clear_value(&mut self, clear_value: [f32; 4]) {
         self.clear_value = clear_value;
     }

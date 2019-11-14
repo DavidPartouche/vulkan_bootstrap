@@ -20,8 +20,8 @@ impl From<&str> for DeviceExtensions {
 }
 
 impl DeviceExtensions {
-    pub fn name(&self) -> &'static CStr {
-        match *self {
+    pub fn name(self) -> &'static CStr {
+        match self {
             DeviceExtensions::ExtDescriptorIndexing => {
                 CStr::from_bytes_with_nul(b"VK_EXT_descriptor_indexing\0").unwrap()
             }
