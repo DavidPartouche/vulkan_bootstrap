@@ -53,6 +53,11 @@ impl Buffer {
 
         Ok(())
     }
+
+    pub fn update_buffer(&self, command_buffer: vk::CommandBuffer, data: &[u8]) {
+        self.device
+            .cmd_update_buffer(command_buffer, self.buffer, data);
+    }
 }
 
 pub struct BufferBuilder<'a> {
@@ -92,7 +97,9 @@ impl<'a> BufferBuilder<'a> {
             BufferType::ShaderBindingTable => vk::BufferUsageFlags::TRANSFER_SRC,
             BufferType::Staging => vk::BufferUsageFlags::TRANSFER_SRC,
             BufferType::Storage => vk::BufferUsageFlags::STORAGE_BUFFER,
-            BufferType::Uniform => vk::BufferUsageFlags::UNIFORM_BUFFER,
+            BufferType::Uniform => {
+                vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_DST
+            }
             BufferType::Vertex => {
                 vk::BufferUsageFlags::VERTEX_BUFFER
                     | vk::BufferUsageFlags::TRANSFER_DST

@@ -496,6 +496,12 @@ impl VulkanDevice {
             self.device.unmap_memory(memory);
         }
     }
+    
+    pub fn cmd_update_buffer(&self, command_buffer: vk::CommandBuffer, buffer: vk::Buffer, data: &[u8]) {
+        unsafe {
+            self.device.cmd_update_buffer(command_buffer, buffer, 0, data);
+        }
+    }
 }
 
 pub struct VulkanDeviceBuilder<'a> {
